@@ -72,7 +72,8 @@ Very much spherical!
 
 
 Most features are fairly normal before scaling, so standarization and normalization produce similar distributions
-    --> Probably the method based on the modeling procedure (aka, standardization usually best for PCA)
+
+Probably choose the method based on the modeling procedure (aka, standardization usually best for PCA)
 
 
 
@@ -116,7 +117,9 @@ Depth of Target:
     --> ADOT to sticks would almost more intuitive, but it's spread under 0, so not really
 
     --> % pass deep and behind LOS not correlated, but are with ADOT
-    --> hmmmmm
+    --> % short / medium just make all those % columns correlated together
+    --> don't want to lose the info from behind LOS and deep passes, as i think those are two distinct types of teams
+        --> you lose teams who really dink and dunk vs maybe teams who live over the middle / digs, but i think screen game + deep passes is more distinctive
 
 TTT: not highly correlated with anything except scrambles (46%), which makes sense
 
@@ -135,6 +138,16 @@ Rush location: keep outside
 |   Clustering    |
 -------------------
 
+Data is sparse (only 288 samples currently) and seems fairly evenly spread
 
-Interested in HDBSCAN and OPTICS for the variable density aspects
+Based on above, density-based algorithms don't make a ton of sense, as there aren't really clearly dense pockets, nor pockets of variable density
+    --> Rules out DBSCAN, HDBSCAN, OPTICS
+
+Thus, probably a more geometric / even-sized algorithm
+    --> Kmeans would be nice for the cluster centroids, getting "most typical teams"
+    --> Spectral performing well in experiment
+
+Want smaller number of clusters to make results more digestible
+    --> Kmeans, Spectral, Bi-secting kmeans
+
 

@@ -255,6 +255,8 @@ def load_stats_team_tendencies_offense():
         IAY_ToSticks=('AirYardsToSticks', 'sum'),
         TotalTimeToThrow=('time_to_throw', 'sum'),
         Pass_BehindLOS=('pass_attempt', lambda x: x[pbp_df['PassDepth'] == 'Behind LOS'].sum()),
+        Pass_Short=('pass_attempt', lambda x: x[pbp_df['PassDepth'] == 'Short'].sum()),
+        Pass_Medium=('pass_attempt', lambda x: x[pbp_df['PassDepth'] == 'Medium'].sum()),
         Pass_Deep=('pass_attempt', lambda x: x[pbp_df['PassDepth'] == 'Long'].sum()),
         Sacks=('sack', 'sum'),
 
@@ -290,6 +292,8 @@ def load_stats_team_tendencies_offense():
     offense_team_tendencies['Avg Time to Throw'] = offense_team_tendencies['TotalTimeToThrow'] / (offense_team_tendencies['Pass_Attempts'] - offense_team_tendencies['Sacks'])
 
     offense_team_tendencies['% Passes Behind LOS'] = offense_team_tendencies['Pass_BehindLOS'] / (offense_team_tendencies['Pass_Attempts'] - offense_team_tendencies['Sacks'])
+    offense_team_tendencies['% Passes Short'] = offense_team_tendencies['Pass_Short'] / (offense_team_tendencies['Pass_Attempts'] - offense_team_tendencies['Sacks'])
+    offense_team_tendencies['% Passes Medium'] = offense_team_tendencies['Pass_Medium'] / (offense_team_tendencies['Pass_Attempts'] - offense_team_tendencies['Sacks'])
     offense_team_tendencies['% Passes Deep'] = offense_team_tendencies['Pass_Deep'] / (offense_team_tendencies['Pass_Attempts'] - offense_team_tendencies['Sacks'])
 
     # Rushing numbers
