@@ -14,6 +14,8 @@ PCA is useful as visualization tool AND feature selection tool AND even on its o
 
 
 
+
+
 -------------
 |    EDA    |
 -------------
@@ -151,3 +153,29 @@ Want smaller number of clusters to make results more digestible
     --> Kmeans, Spectral, Bi-secting kmeans
 
 
+
+
+
+
+
+
+
+
+-------------------
+|      t-SNE      |
+-------------------
+
+Not typically used for feature extraction for subsequent learning models because data is not deterministic (i.e., t-sne function doesn't return same exact values every time)
+
+Use roughly sqroot of N (num samples) as perplexity?
+
+t-SNE on PCA: 
+https://stats.stackexchange.com/questions/263539/clustering-on-the-output-of-t-sne
+
+How to use t-SNE:  
+https://distill.pub/2016/misread-tsne/
+
+Seems that t-SNE is most safely used as a visualization tool. Visualizes high-dimensional, non-linear data in 2 or 3d while preserving local proximities. Could be used before:
+1. Exploration, reduce dimensions to 2 or 3 for visualization and get shape of data
+1. After PCA, to further reduce dimensions to 2 or 3 for visualization
+1. To visualize clusters after clustering

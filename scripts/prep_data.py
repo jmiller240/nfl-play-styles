@@ -9,6 +9,7 @@ January 2026
 import pandas as pd
 import polars as pl
 import numpy as np
+import os
 
 import plotly.express as px
 
@@ -24,7 +25,7 @@ pl.Config.set_tbl_rows(-1)
 ''' Parameters / Constants '''
 
 START_YEAR = 2016       # first year of participation data
-END_YEAR = 2024
+END_YEAR = 2025
 SEASONS = [i for i in range(START_YEAR, END_YEAR + 1)]
 
 
@@ -120,9 +121,18 @@ def defensive_personnel(personnel_str: str) -> str:
 
 ''' Main Functions '''
 
-def load_pbp_participation_data() -> pd.DataFrame:
+def load_pbp_participation_data(export_pbp: bool = False) -> pd.DataFrame:
 
-    ''' PBP Data '''
+    ''' Load locally if we can '''
+
+    search_folder = f'data'
+    file = f'pbp_participation_{START_YEAR}_{END_YEAR}.csv'
+    fpath = f'{search_folder}/{file}'
+    if os.path.exists(fpath):
+        pbp_df = pd.read_csv(fpath)
+        return pbp_df
+
+    ''' Download '''
 
     ## Load ##
     pbp = nfl.load_pbp(seasons=SEASONS)
@@ -154,17 +164,13 @@ def load_pbp_participation_data() -> pd.DataFrame:
 
     # Filter to normal game state
     pbp = pbp.filter(
-        (pl.col('qtr') <= 3),
-        (pl.col('half_seconds_remaining') > 120),
-        (pl.col('score_differential') <= 14),
+        # (pl.col('qtr') <= 3),
+        # (pl.col('half_seconds_remaining') > 120),
+        # (pl.col('score_differential') <= 14),
         (pl.col('special_teams_play') == 0),
         (pl.col('play_type_nfl') != 'PAT2'),
         (pl.col('play_type_nfl') != 'UNSPECIFIED'),     # Unspecified seems to be mostly punt / FG formation plays where something weird happened (fake, fumble, botched snap, etc)
     )
-
-    # print(pbp.shape)
-    # print(pbp['MasterPlayID'].n_unique())
-    # print(pbp.head())
 
 
     ''' Participation Data '''
@@ -208,10 +214,6 @@ def load_pbp_participation_data() -> pd.DataFrame:
         OffenseHeavyPersonnel=pl.when((pl.col('OffenseMultRBs') == 1) | (pl.col('OffenseMultTEs') == 1)).then(1).otherwise(0),
     )
 
-    # print(participation.shape)
-    # print(participation['MasterPlayID'].n_unique())
-    # print(participation.filter(pl.col('season') == 2024, pl.col('route') != '').head(100))
-
 
     ''' Combine '''
 
@@ -223,8 +225,9 @@ def load_pbp_participation_data() -> pd.DataFrame:
     # Create dataframe
     pbp_df = pd.DataFrame(columns=pbp.columns, data=pbp)
 
-    # print(pbp_df.shape)
-    # print(pbp_df.head().to_string())
+    # Export
+    if export_pbp:
+        pbp_df.to_csv(f'pbp_participation_{START_YEAR}_{END_YEAR}.csv', index=False)
 
     return pbp_df
 
@@ -234,18 +237,83 @@ def load_stats_team_tendencies_offense():
 
     ## Get data ##
     pbp_df = load_pbp_participation_data()
- 
-    ## Base Stats ##
-    offense_team_tendencies = pbp_df.groupby(['posteam', 'season']).aggregate(
+    
+    ## Records ##
+
+    # Load schedule
+    schedule = nfl.load_schedules(seasons=SEASONS)
+    
+    # Replace teams
+    schedule = schedule.with_columns(
+        pl.col("home_team").replace({'OAK': 'LV', 'SD': 'LAC'}),
+        pl.col("away_team").replace({'OAK': 'LV', 'SD': 'LAC'}),
+    )
+
+    # W / L / T cols
+    schedule = schedule.with_columns(
+        home_team_win=pl.when(pl.col('result') > 0).then(1).otherwise(0),
+        home_team_loss=pl.when(pl.col('result') < 0).then(1).otherwise(0),
+        home_team_tie=pl.when(pl.col('result') == 0).then(1).otherwise(0),
+        away_team_win=pl.when(pl.col('result') < 0).then(1).otherwise(0),
+        away_team_loss=pl.when(pl.col('result') > 0).then(1).otherwise(0),
+        away_team_tie=pl.when(pl.col('result') == 0).then(1).otherwise(0),
+    )
+
+    # Records
+    home_team_records = schedule.filter(pl.col('game_type') == 'REG').group_by(['home_team', 'season']).agg(
+        home_games=pl.len(),
+        home_wins=pl.col('home_team_win').sum(),
+        home_losses=pl.col('home_team_loss').sum(),
+        home_ties=pl.col('home_team_tie').sum(),
+    ).rename({'home_team': 'posteam'})
+    away_team_records = schedule.filter(pl.col('game_type') == 'REG').group_by(['away_team', 'season']).agg(
+        away_games=pl.len(),
+        away_wins=pl.col('away_team_win').sum(),
+        away_losses=pl.col('away_team_loss').sum(),
+        away_ties=pl.col('away_team_tie').sum(),
+    ).rename({'away_team': 'posteam'})
+
+    team_records = home_team_records.join(away_team_records, on=['posteam', 'season'], how='inner').with_columns(
+        G=pl.col('home_games') + pl.col('away_games'),
+        W=pl.col('home_wins') + pl.col('away_wins'),
+        L=pl.col('home_losses') + pl.col('away_losses'),
+        T=pl.col('home_ties') + pl.col('away_ties'),
+    )
+
+    team_records = team_records.with_columns(
+        PCT=pl.col('W') / pl.col('G')
+    )
+
+    team_records = team_records.to_pandas().set_index(['posteam', 'season'])
+
+    ## Totals ##
+    offense_team_totals = pbp_df.groupby(['posteam', 'season']).aggregate(
+        Games=('game_id', 'nunique'),
+        Drives=('DriveID', 'nunique'),
+        Plays=('posteam', 'size'),
+    )
+
+    # Overall numbers
+    offense_team_totals['Plays / Game'] = offense_team_totals['Plays'] / offense_team_totals['Games']
+    offense_team_totals['Drives / Game'] = offense_team_totals['Drives'] / offense_team_totals['Games']
+
+
+    ## Tendency Stats ##
+    normal_gs_slice = pbp_df.loc[
+        (pbp_df['qtr'] <= 3) & 
+        (pbp_df['half_seconds_remaining'] > 120) &
+        (pbp_df['score_differential'] <= 14), :]
+
+    offense_team_tendencies = normal_gs_slice.groupby(['posteam', 'season']).aggregate(
         # General
         Games=('game_id', 'nunique'),
         Drives=('DriveID', 'nunique'),
         Plays=('posteam', 'size'),
-        Neutral_Down_Plays=('posteam', lambda x: x[pbp_df['NeutralDown'] == 1].shape[0]),
+        Neutral_Down_Plays=('posteam', lambda x: x[normal_gs_slice['NeutralDown'] == 1].shape[0]),
 
         # Play Types
         Pass_Plays=('pass', 'sum'),
-        Neutral_Down_Pass=('pass', lambda x: x[pbp_df['NeutralDown'] == 1].sum()),
+        Neutral_Down_Pass=('pass', lambda x: x[normal_gs_slice['NeutralDown'] == 1].sum()),
         Pass_Attempts=('pass_attempt', 'sum'),
         
         QBScrambles=('qb_scramble', 'sum'),
@@ -254,20 +322,20 @@ def load_stats_team_tendencies_offense():
         IAY=('air_yards', 'sum'),
         IAY_ToSticks=('AirYardsToSticks', 'sum'),
         TotalTimeToThrow=('time_to_throw', 'sum'),
-        Pass_BehindLOS=('pass_attempt', lambda x: x[pbp_df['PassDepth'] == 'Behind LOS'].sum()),
-        Pass_Short=('pass_attempt', lambda x: x[pbp_df['PassDepth'] == 'Short'].sum()),
-        Pass_Medium=('pass_attempt', lambda x: x[pbp_df['PassDepth'] == 'Medium'].sum()),
-        Pass_Deep=('pass_attempt', lambda x: x[pbp_df['PassDepth'] == 'Long'].sum()),
+        Pass_BehindLOS=('pass_attempt', lambda x: x[normal_gs_slice['PassDepth'] == 'Behind LOS'].sum()),
+        Pass_Short=('pass_attempt', lambda x: x[normal_gs_slice['PassDepth'] == 'Short'].sum()),
+        Pass_Medium=('pass_attempt', lambda x: x[normal_gs_slice['PassDepth'] == 'Medium'].sum()),
+        Pass_Deep=('pass_attempt', lambda x: x[normal_gs_slice['PassDepth'] == 'Long'].sum()),
         Sacks=('sack', 'sum'),
 
         # Rushing
         Rush_Plays=('rush', 'sum'),
         Rush_Attempts=('rush_attempt', 'sum'),
-        Rush_Inside=('rush', lambda x: x[pbp_df['RunLocation'] == 'Inside'].sum()),
-        Rush_Outside=('rush', lambda x: x[pbp_df['RunLocation'] == 'Outside'].sum()),
+        Rush_Inside=('rush', lambda x: x[normal_gs_slice['RunLocation'] == 'Inside'].sum()),
+        Rush_Outside=('rush', lambda x: x[normal_gs_slice['RunLocation'] == 'Outside'].sum()),
 
         # Personnel
-        Plays_11_Personnel=('posteam', lambda x: x[pbp_df['OffensePersonnel'] == '11'].shape[0]),
+        Plays_11_Personnel=('posteam', lambda x: x[normal_gs_slice['OffensePersonnel'] == '11'].shape[0]),
         Plays_Heavy_Personnel=('OffenseHeavyPersonnel', 'sum'),
         Plays_Mult_RBs=('OffenseMultRBs', 'sum'),
         Plays_Zero_RBs=('OffenseZeroRBs', 'sum'),
@@ -275,10 +343,6 @@ def load_stats_team_tendencies_offense():
         Plays_Zero_TEs=('OffenseZeroTEs', 'sum'),
         Plays_Extra_OL=('OffenseExtraOL', 'sum')
     )
-
-    # Overall numbers
-    offense_team_tendencies['Plays / Game'] = offense_team_tendencies['Plays'] / offense_team_tendencies['Games']
-    offense_team_tendencies['Drives / Game'] = offense_team_tendencies['Drives'] / offense_team_tendencies['Games']
 
     # Play Types
     offense_team_tendencies['% Pass'] = offense_team_tendencies['Pass_Plays'] / offense_team_tendencies['Plays']
@@ -307,9 +371,9 @@ def load_stats_team_tendencies_offense():
         offense_team_tendencies[col_name] = offense_team_tendencies[col] / offense_team_tendencies['Plays']
 
     # Formations
-    offense_formations = pbp_df.groupby(['posteam', 'season', 'OffenseFormation']).aggregate(
+    offense_formations = normal_gs_slice.groupby(['posteam', 'season', 'OffenseFormation']).aggregate(
         Plays=('posteam', 'size'),
-        Neutral_Down_Plays=('posteam', lambda x: x[pbp_df['NeutralDown'] == 1].shape[0]),
+        Neutral_Down_Plays=('posteam', lambda x: x[normal_gs_slice['NeutralDown'] == 1].shape[0]),
 
         Pass_Plays=('pass', 'sum'),
         Rush_Plays=('rush', 'sum')
@@ -333,7 +397,7 @@ def load_stats_team_tendencies_offense():
     ''' Players - Receiving '''
 
     # All receivers
-    team_targets = pbp_df.groupby(['posteam', 'season', 'receiver']).aggregate(
+    team_targets = normal_gs_slice.groupby(['posteam', 'season', 'receiver']).aggregate(
         Plays=('pass', 'sum'),
         Targets=('pass_attempt', 'sum')
     ).sort_values(by=['posteam', 'season', 'Targets'], ascending=[True, True, False])
@@ -354,7 +418,7 @@ def load_stats_team_tendencies_offense():
     ''' Players - Rushing '''
 
     # All rushers
-    team_rushing = pbp_df.loc[pbp_df['rush'] == 1,:].groupby(['posteam', 'season', 'rusher']).aggregate(
+    team_rushing = normal_gs_slice.loc[normal_gs_slice['rush'] == 1,:].groupby(['posteam', 'season', 'rusher']).aggregate(
         Plays=('rush', 'sum'),
         Attempts=('rush_attempt', 'sum')
     ).sort_values(by=['posteam', 'season', 'Attempts'], ascending=[True, True, False])
@@ -374,8 +438,15 @@ def load_stats_team_tendencies_offense():
 
     ''' Combine '''
 
-    # Start with base
-    offense_inputs = offense_team_tendencies.copy()
+    # Start with records
+    offense_inputs = team_records[['G', 'W', 'L', 'T', 'PCT']].copy()
+
+    # Add totals
+    offense_inputs = offense_inputs.merge(offense_team_totals, left_index=True, right_index=True, how='left')
+
+    # Merge in tendencies
+    offense_team_tendencies = offense_team_tendencies.drop(columns=['Games', 'Drives', 'Plays'])
+    offense_inputs = offense_inputs.merge(offense_team_tendencies, left_index=True, right_index=True, how='left')
 
     # Add receivers / rushers
     offense_inputs = offense_inputs.merge(team_targets_seasons, left_index=True, right_index=True, how='left')
@@ -385,8 +456,6 @@ def load_stats_team_tendencies_offense():
     for col in offense_inputs.columns:
         offense_inputs[col] = pd.to_numeric(offense_inputs[col])
 
-    # print(offense_inputs.shape)
-    # print(offense_inputs.head().to_string())
 
     return offense_inputs
 

@@ -1,0 +1,8 @@
+
+# Files
+
+
+# Folders
+.venv/
+data/
+__pycache__
